@@ -1,7 +1,7 @@
 package Jenkins::NotificationListener;
 use strict;
 use warnings;
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use Net::Jenkins;
 use Net::Jenkins::Job;
@@ -11,6 +11,9 @@ use AnyEvent::Socket;
 use Moose;
 use methods;
 use JSON::XS;
+
+our @ISA = ( 'Moose::Object', 'Exporter' );
+our @EXPORT = qw(parse_jenkins_notification);
 
 has host => (is => 'rw');
 
@@ -22,21 +25,26 @@ has on_error => (is => 'rw', default => sub {
     return sub { warn @_; };
 });
 
+sub parse_jenkins_notification {
+    my $json = shift;
+    my $args = decode_json $json;
+    return Jenkins::Notification->new( %$args , raw_json => $json );
+}
+
 method start {
     tcp_server $self->host, $self->port , sub {
         my ($fh, $host, $port) = @_;
-        my $content = '';
+        my $json = '';
         my $buf = '';
         while( my $bytes = sysread $fh, $buf, 1024 ) {
-            $content .= $buf;
+            $json .= $buf;
         }
         eval {
-            if( $content ) {
-                my $args = decode_json $content;
-                my $payload = Jenkins::Notification->new( %$args , raw_json => $content );
+            if( $json ) {
+                my $payload = parse_jenkins_notification($json);
                 $self->on_notify->( $payload );
             } else {
-                die 'Empty content';
+                die 'Request body is empty.';
             }
         };
         if ( $@ ) {
@@ -80,6 +88,14 @@ By using L<Jenkins::NotificationListener>, you can simple use the payload object
 To test your Jenkins notification plugin, you can also use L<jenkins-notification-listener.pl> script.
 
     $ jenkins-notification-listener.pl
+
+=head1 EXPORTED FUNCTION
+
+    use Jenkins::NotificationListener;   # export parse_jenkins_notification function
+    my $notification = parse_jenkins_notification($json);
+    $notification;   # Jenkins::Notification object
+    $notification->job;
+    $notification->build;
 
 =head1 INSTALLATION
 
